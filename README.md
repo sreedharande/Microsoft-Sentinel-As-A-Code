@@ -16,7 +16,7 @@ Export Microsoft Sentinel artifacts like Analytical Rules, Hunting Queries, Work
 
 3. Run the script using the following command  
    ```  
-   .\ExportRules.ps1 -TenantID xxxx `
+   .\Export_Analytical_Rules.ps1 -TenantID xxxx `
                         
    ```
 4. First release
