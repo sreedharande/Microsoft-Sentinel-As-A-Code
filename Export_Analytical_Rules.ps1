@@ -18,7 +18,7 @@
         LASTEDIT: 1-31-2022
 
     .EXAMPLE
-        .\ExportRules.ps1 -TenantID xxxx 
+        .\Export_Analytical_Rules.ps1 -TenantID xxxx 
 #>
 
 
@@ -338,8 +338,8 @@ Function Get-MicrosoftSentinelAlertRule {
 #endregion MainFunctions
 
 #region DriverProgram
-#Get-RequiredModules("Az")
-#Get-RequiredModules("Az.SecurityInsights")
+Get-RequiredModules("Az")
+Get-RequiredModules("Az.SecurityInsights")
 
 $TimeStamp = Get-Date -Format yyyyMMdd_HHmmss 
 $LogFileName = '{0}_{1}.csv' -f "Export_Microsoft_Sentinel_Rules", $TimeStamp
