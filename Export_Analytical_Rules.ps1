@@ -15,7 +15,7 @@
     
     .NOTES
         AUTHOR: Sreedhar Ande
-        LASTEDIT: 1-31-2022
+        LASTEDIT: 2-8-2022
 
     .EXAMPLE
         .\Export_Analytical_Rules.ps1 -TenantID xxxx 
@@ -24,7 +24,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] $TenantID
+    [Parameter(Mandatory = $true)] $TenantID    
 )
 
 #region Helper Functions
@@ -111,26 +111,29 @@ function Get-RequiredModules {
             }
         }
         else {
-            Write-Log -Message "Checking updates for module $Module" -LogFileName $LogFileName -Severity Information
-            $versions = Find-Module $Module -AllVersions
-            $latestVersions = ($versions | Measure-Object -Property Version -Maximum).Maximum.ToString()
-            $currentVersion = (Get-InstalledModule | Where-Object {$_.Name -eq $Module}).Version.ToString()
-            if ($currentVersion -ne $latestVersions) {
-                #check for Admin Privleges
-                $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+            if ($UpdateAzModules) {
+                Write-Log -Message "Checking updates for module $Module" -LogFileName $LogFileName -Severity Information
+                $currentVersion = [Version](Get-InstalledModule | Where-Object {$_.Name -eq $Module}).Version
+                # Get latest version from gallery
+                $latestVersion = [Version](Find-Module -Name $Module).Version
+                if ($currentVersion -ne $latestVersion) {
+                    #check for Admin Privleges
+                    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 
-                if (-not ($currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))) {
-                    #Not an Admin, install to current user            
-                    Write-Log -Message "Can not update the $Module module. You are not running as Administrator" -LogFileName $LogFileName -Severity Warning
-                    Write-Log -Message "Updating $Module module to current user Scope" -LogFileName $LogFileName -Severity Warning
-                    
-                    Install-Module -Name $Module -Scope CurrentUser -Repository PSGallery -Force -AllowClobber
-                    Import-Module -Name $Module -Force
+                    if (-not ($currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))) {
+                        #install to current user            
+                        Write-Log -Message "Can not update the $Module module. You are not running as Administrator" -LogFileName $LogFileName -Severity Warning
+                        Write-Log -Message "Updating $Module from [$currentVersion] to [$latestVersion] to current user Scope" -LogFileName $LogFileName -Severity Warning
+                        Update-Module -Name $Module -RequiredVersion $latestVersion -Force
+                    }
+                    else {
+                        #Admin - Install to all users																		   
+                        Write-Log -Message "Updating $Module from [$currentVersion] to [$latestVersion] to all users" -LogFileName $LogFileName -Severity Warning
+                        Update-Module -Name $Module -RequiredVersion $latestVersion -Force
+                    }
                 }
                 else {
-                    #Admin, install to all users																		   
-                    Write-Log -Message "Updating the $Module module to all users" -LogFileName $LogFileName -Severity Warning
-                    Install-Module -Name $Module -Repository PSGallery -Force -AllowClobber
+                    Write-Log -Message "Importing module $Module" -LogFileName $LogFileName -Severity Information
                     Import-Module -Name $Module -Force
                 }
             }
@@ -334,10 +337,23 @@ Function Get-MicrosoftSentinelAlertRule {
     
 }
 
-
 #endregion MainFunctions
 
 #region DriverProgram
+$AzModulesQuestion = "Do you want to update required Az Modules to latest version?"
+$AzModulesQuestionChoices = New-Object Collections.ObjectModel.Collection[Management.Automation.Host.ChoiceDescription]
+$AzModulesQuestionChoices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList '&Yes'))
+$AzModulesQuestionChoices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList '&No'))
+
+$AzModulesQuestionDecision = $Host.UI.PromptForChoice($title, $AzModulesQuestion, $AzModulesQuestionChoices, 1)
+
+if ($AzModulesQuestionDecision -eq 0) {
+    $UpdateAzModules = $true
+}
+else {
+    $UpdateAzModules = $false
+}
+
 Get-RequiredModules("Az")
 Get-RequiredModules("Az.SecurityInsights")
 
@@ -346,7 +362,7 @@ $LogFileName = '{0}_{1}.csv' -f "Export_Microsoft_Sentinel_Rules", $TimeStamp
 
 # Check Powershell version, needs to be 5 or higher
 if ($host.Version.Major -lt 7) {
-    Write-Log "Supported PowerShell version for this script is 5 or above" -LogFileName $LogFileName -Severity Error    
+    Write-Log "Supported PowerShell version for this script is 7" -LogFileName $LogFileName -Severity Error    
     exit
 }
 
@@ -445,13 +461,20 @@ foreach($CurrentSubscription in $GetSubscriptions)
                                 $templateParameters = @{}
 
                                 $templateParameters.Add("workspace", @{                                        
-                                    "type"= "string"
+                                    "type"= "String"
                                 })
                                 
+                                $alertName= $rule.name
                                 $rule.id = ""
-                                $rule.etag = ""
-                                $rule.properties.lastModifiedUtc = ""
-
+                                $rule.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
+                                $rule.name=""
+                                $rule.name="[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($alertName)')]"
+                                $rule.type=""
+                                $rule.type = "Microsoft.OperationalInsights/workspaces/providers/alertRules"                                
+                                
+                                $rule.PSObject.Properties.Remove('etag')
+                                $rule.properties.PSObject.Properties.Remove('lastModifiedUtc')
+                                $rule | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
                                 $armTemplate = @{
                                     '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
                                     "contentVersion"= "1.0.0.0"
@@ -474,9 +497,9 @@ foreach($CurrentSubscription in $GetSubscriptions)
 
         } 	
     }
-    catch [Exception]
-    { 
-        Write-Log $_ -LogFileName $LogFileName -Severity Error                         		
+    catch [Exception] {
+        $ErrorMessage = $_.Exception.Message 
+        Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error                         		
     }		 
 }
 #endregion DriverProgram  
