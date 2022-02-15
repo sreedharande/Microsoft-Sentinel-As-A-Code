@@ -354,8 +354,8 @@ else {
     $UpdateAzModules = $false
 }
 
-Get-RequiredModules("Az")
-Get-RequiredModules("Az.SecurityInsights")
+Get-RequiredModules("Az.Accounts")
+Get-RequiredModules("Az.OperationalInsights")
 
 $TimeStamp = Get-Date -Format yyyyMMdd_HHmmss 
 $LogFileName = '{0}_{1}.csv' -f "Export_Microsoft_Sentinel_Rules", $TimeStamp
