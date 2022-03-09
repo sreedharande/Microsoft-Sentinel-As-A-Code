@@ -13,22 +13,18 @@
     .PARAMETER TenantID
         Enter the TenantID (required)
     
-    .PARAMETER RuleType
-        Enter the rule type to export. Valid values: Alert, Automation, All
-
     .NOTES
-        AUTHOR: Sreedhar Ande and Javier Soriao
-        LASTEDIT: 2-17-2022
+        AUTHOR: Sreedhar Ande and Javier Soriano
+        LASTEDIT: 3-8-2022
 
     .EXAMPLE
-        .\Export__Rules.ps1 -TenantID xxxx 
+        .\Export_Sentinel_Artifacts.ps1 -TenantID xxxx 
 #>
 
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] $TenantID,
-    [Parameter(Mandatory = $true)] $RuleType    
+    [Parameter(Mandatory = $true)] $TenantID   
 )
 
 #region Helper Functions
@@ -176,6 +172,76 @@ Function Clear-FileName {
     $invalidChars = [System.IO.Path]::GetInvalidFileNameChars()
     $cleanName = [RegEx]::Replace($Name, "[$invalidChars]", [string]::Empty)
     return $cleanName
+}
+
+Function Download-SentinelArtifacts {
+    param(
+        [parameter(Mandatory = $true)] $SentinelWorkspaceArtifacts,
+        [parameter(Mandatory = $true)] $ArtifactType
+    )
+
+    if ($SentinelWorkspaceArtifacts) {												  
+		foreach ($WorkspaceArtifact in $SentinelWorkspaceArtifacts) {
+			if (Test-Path "$FolderName/$($LAW.Name)") {
+				$WorkspaceDirectory = "$FolderName/$($LAW.Name)"
+			}
+			else {
+				$WorkspaceDirectory = New-Item -Path $FolderName -Name $LAW.Name -ItemType "directory"
+			}                                                           
+			
+			                              
+            if (Test-Path "$WorkspaceDirectory/$ArtifactType") {
+                $LocalArtifactsDirectory = "$WorkspaceDirectory/$ArtifactType"
+            }
+            else {
+                $LocalArtifactsDirectory = New-Item -Path $WorkspaceDirectory -Name $ArtifactType -ItemType "directory"
+            }
+            
+            $templateParameters = @{}
+
+            $templateParameters.Add("workspace", @{                                        
+                "type"= "String"
+            })
+
+            if($ArtifactType.Trim() -eq "Automation Rules") {
+                $ArtifactProvider = "automationRules"
+                $ArtifactKind = "Automation"
+            }
+            elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
+                $ArtifactProvider = "alertRules"
+                $ArtifactKind = "Analytics"
+                $WorkspaceArtifact.id = ""
+                $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
+                $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
+            }
+            
+            $ArtifactName= $WorkspaceArtifact.name
+            $WorkspaceArtifact.name = ""
+            $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName)')]"
+            $WorkspaceArtifact.type = ""
+            $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
+            
+            $WorkspaceArtifact.PSObject.Properties.Remove('etag')
+            $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
+            
+            $armTemplate = @{
+                '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
+                "contentVersion"= "1.0.0.0"
+                "parameters"= $templateParameters                                        
+                "resources"= @($WorkspaceArtifact)
+            }                                 
+                            
+            $ArtifactDisplayName = $WorkspaceArtifact.properties.displayName
+            if([string]::IsNullOrEmpty($ArtifactDisplayName)) {
+                $ArtifactDisplayName = $WorkspaceArtifact.Id
+            }          
+            $armTemplateOutput = $armTemplate | ConvertTo-Json -Depth 100   
+            $armTemplateOutput = $armTemplateOutput -replace "\\u0027", "'"    							
+            Save-MicrosoftSentinelRule -Rule $armTemplateOutput -RuleName $ArtifactDisplayName -Format "Json" -Kind $ArtifactKind -Path $LocalArtifactsDirectory
+                                
+		}
+	}
+
 }
 
 #endregion
@@ -428,8 +494,8 @@ else {
     $UpdateAzModules = $false
 }
 
-Get-RequiredModules("Az.Accounts")
-Get-RequiredModules("Az.OperationalInsights")
+#Get-RequiredModules("Az.Accounts")
+#Get-RequiredModules("Az.OperationalInsights")
 
 $TimeStamp = Get-Date -Format yyyyMMdd_HHmmss 
 $LogFileName = '{0}_{1}.csv' -f "Export_Microsoft_Sentinel_Rules", $TimeStamp
@@ -478,9 +544,8 @@ foreach($CurrentSubscription in $GetSubscriptions)
         }
         else {
             Write-Log "Listing Log Analytics workspace" -LogFileName $LogFileName -Severity Information
+                    
             
-            Write-Log "Exporting Azure Sentinel Rules" -LogFileName $LogFileName -Severity Information
-            $FolderName = Get-FolderName
             foreach($LAW in $LAWs) { 
                 $AzureAccessToken = (Get-AzAccessToken).Token
                 $ResourceManagerUrl = $azContext.Environment.ResourceManagerUrl        
@@ -488,6 +553,15 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 $APIHeaders.Add("Content-Type", "application/json")
                 $APIHeaders.Add("Authorization", "Bearer $AzureAccessToken")    
 
+                
+
+                $SentinelArtifacts = New-Object -TypeName System.Collections.ArrayList
+                $SentinelArtifacts.Add("Scheduled Analytical Rules")
+                $SentinelArtifacts.Add("Automation Rules")                
+
+                $ArtifactsToDownload = $SentinelArtifacts | Out-GridView -Title "Select Artifacts to download" -PassThru
+                
+                $FolderName = Get-FolderName
                 if (Test-Path $FolderName) {
                     Write-Log "$FolderName Path Exists" -LogFileName $LogFileName -Severity Information
                 }
@@ -502,130 +576,41 @@ foreach($CurrentSubscription in $GetSubscriptions)
                         Break
                     }
                 }
+
+                foreach($ArtifactToDownload in $ArtifactsToDownload) {
+                    if($ArtifactToDownload.Trim() -eq "Automation Rules") {
+                        try {
+                            $AutomationRules = Get-MicrosoftSentinelAutomationRule -BaseUri $LAW.ResourceId.ToString()
+                        }
+                        catch {
+                            $ErrorMessage = $_.Exception.Message
+                            Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
+                            Write-Log $_ -LogFileName $LogFileName -Severity Error                         
+                        }
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $AutomationRules -ArtifactType $ArtifactToDownload.Trim()
+                    }
+                    elseif ($ArtifactToDownload.Trim() -eq "Scheduled Analytical Rules") {
+                        try {
+                            $AnalyticalRules = Get-MicrosoftSentinelAlertRule -BaseUri $LAW.ResourceId.ToString()
+                        }
+                        catch {
+                            $ErrorMessage = $_.Exception.Message
+                            Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
+                            Write-Log $_ -LogFileName $LogFileName -Severity Error                         
+                        }
+                        $ScheduledAnalyticalRules = New-Object -TypeName System.Collections.ArrayList
+                        foreach($AnalyticalRule in $AnalyticalRules) {
+                            if($AnalyticalRule.kind -eq "Scheduled") {
+                                $ScheduledAnalyticalRules.Add($AnalyticalRule)
+                            }
+                        }
+
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $ScheduledAnalyticalRules -ArtifactType $ArtifactToDownload.Trim()
+                        
+                    }
+
+                }              
                 
-                if (($RuleType -like 'Automation') -or ($RuleType -like 'All')){
-                    try {
-                        $rules = Get-MicrosoftSentinelAutomationRule -BaseUri $LAW.ResourceId.ToString()
-                    }
-                    catch {
-                        $ErrorMessage = $_.Exception.Message
-                        Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
-                        Write-Log $_ -LogFileName $LogFileName -Severity Error                         
-                    }
-                    Write-Log "Got the following rules: $rules"
-
-                    if ($rules) {
-                        Write-Log "Building automation rules templates" 
-                        foreach ($rule in $rules) {
-                            if (Test-Path "$FolderName/$($LAW.Name)") {
-                                $WorkspaceDirectory = "$FolderName/$($LAW.Name)"
-                            }
-                            else {
-                                $WorkspaceDirectory = New-Item -Path $FolderName -Name $LAW.Name -ItemType "directory"
-                            }                                                           
-                            
-                            if (Test-Path "$WorkspaceDirectory/Automation") {
-                                $AutomationRulesDirectory = "$WorkspaceDirectory/Automation"
-                            }
-                            else {
-                                $AutomationRulesDirectory = New-Item -Path $WorkspaceDirectory -Name "Automation" -ItemType "directory"
-                            }
-
-                            $templateParameters = @{}
-
-                            $templateParameters.Add("workspace", @{                                        
-                                "type"= "String"
-                            })
-                                
-                            $ruleName= $rule.name
-                            $rule.name=""
-                            $rule.name="[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ruleName)')]"
-                            $rule.type=""
-                            $rule.type = "Microsoft.OperationalInsights/workspaces/providers/automationRules"                                
-                            
-                            $rule.PSObject.Properties.Remove('etag')
-                            $rule.properties.PSObject.Properties.Remove('lastModifiedUtc')
-                            $rule | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
-                            $armTemplate = @{
-                                '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
-                                "contentVersion"= "1.0.0.0"
-                                "parameters"= $templateParameters                                        
-                                "resources"= @($rule)
-                            }                                 
-                                            
-                            $RuleDisplayName = $rule.properties.displayName
-                            if([string]::IsNullOrEmpty($RuleDisplayName)) {
-                                $RuleDisplayName = $rule.Id
-                            }          
-                            $armTemplateOutput = $armTemplate | ConvertTo-Json -Depth 100   
-                            $armTemplateOutput = $armTemplateOutput -replace "\\u0027", "'"    							
-                            Save-MicrosoftSentinelRule -Rule $armTemplateOutput -RuleName $RuleDisplayName -Format "Json" -Kind Automation -Path $AutomationRulesDirectory                  
-                        }
-                    }
-                }
-
-                if (($RuleType -like 'Alert') -or ($RuleType -like 'All')) {
-                    try {
-                        $rules = Get-MicrosoftSentinelAlertRule -BaseUri $LAW.ResourceId.ToString()
-                    }
-                    catch {
-                        $ErrorMessage = $_.Exception.Message
-                        Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
-                        Write-Log $_ -LogFileName $LogFileName -Severity Error                         
-                    }
-        
-                    if ($rules) {
-                        foreach ($rule in $rules) {
-                            if (Test-Path "$FolderName/$($LAW.Name)") {
-                                $WorkspaceDirectory = "$FolderName/$($LAW.Name)"
-                            }
-                            else {
-                                $WorkspaceDirectory = New-Item -Path $FolderName -Name $LAW.Name -ItemType "directory"
-                            }                                                           
-                            
-                            if($rule.kind -eq "Scheduled") {                              
-                                if (Test-Path "$WorkspaceDirectory/Scheduled") {
-                                    $ScheduledRulesDirectory = "$WorkspaceDirectory/Scheduled"
-                                }
-                                else {
-                                    $ScheduledRulesDirectory = New-Item -Path $WorkspaceDirectory -Name "Scheduled" -ItemType "directory"
-                                }
-                                
-                                $templateParameters = @{}
-
-                                $templateParameters.Add("workspace", @{                                        
-                                    "type"= "String"
-                                })
-                                
-                                $alertName= $rule.name
-                                $rule.id = ""
-                                $rule.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
-                                $rule.name=""
-                                $rule.name="[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($alertName)')]"
-                                $rule.type=""
-                                $rule.type = "Microsoft.OperationalInsights/workspaces/providers/alertRules"                                
-                                
-                                $rule.PSObject.Properties.Remove('etag')
-                                $rule.properties.PSObject.Properties.Remove('lastModifiedUtc')
-                                $rule | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
-                                $armTemplate = @{
-                                    '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
-                                    "contentVersion"= "1.0.0.0"
-                                    "parameters"= $templateParameters                                        
-                                    "resources"= @($rule)
-                                }                                 
-                                                
-                                $RuleDisplayName = $rule.properties.displayName
-                                if([string]::IsNullOrEmpty($RuleDisplayName)) {
-                                    $RuleDisplayName = $rule.Id
-                                }          
-                                $armTemplateOutput = $armTemplate | ConvertTo-Json -Depth 100   
-                                $armTemplateOutput = $armTemplateOutput -replace "\\u0027", "'"    							
-                                Save-MicrosoftSentinelRule -Rule $armTemplateOutput -RuleName $RuleDisplayName -Format "Json" -Kind Analytics -Path $ScheduledRulesDirectory
-                            }                      
-                        }
-                    }
-                }
             }                  
 
         } 	
