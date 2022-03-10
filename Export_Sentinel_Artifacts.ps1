@@ -73,7 +73,7 @@ function Write-Log {
     }    
 }
 
-function Get-RequiredModules {
+Function Get-RequiredModules {
     <#
     .DESCRIPTION 
     Get-Required is used to install and then import a specified PowerShell module.
@@ -138,8 +138,9 @@ function Get-RequiredModules {
                 }
             }
             else {
-                Write-Log -Message "Importing module $Module" -LogFileName $LogFileName -Severity Information
-                Import-Module -Name $Module -Force
+                $latestVersion = [Version](Get-Module -Name $Module).Version               
+                Write-Log -Message "Importing module $Module with version $latestVersion" -LogFileName $LogFileName -Severity Information
+                Import-Module -Name $Module -RequiredVersion $latestVersion -Force
             }
         }
         # Install-Module will obtain the module from the gallery and install it on your local machine, making it available for use.
@@ -177,16 +178,17 @@ Function Clear-FileName {
 Function Download-SentinelArtifacts {
     param(
         [parameter(Mandatory = $true)] $SentinelWorkspaceArtifacts,
-        [parameter(Mandatory = $true)] $ArtifactType
+        [parameter(Mandatory = $true)] $ArtifactType,
+        [parameter(Mandatory = $true)] $LogAnalyticsWorkspaceName
     )
 
     if ($SentinelWorkspaceArtifacts) {												  
 		foreach ($WorkspaceArtifact in $SentinelWorkspaceArtifacts) {
-			if (Test-Path "$FolderName/$($LAW.Name)") {
-				$WorkspaceDirectory = "$FolderName/$($LAW.Name)"
+			if (Test-Path "$FolderName/$LogAnalyticsWorkspaceName") {
+				$WorkspaceDirectory = "$FolderName/$LogAnalyticsWorkspaceName"
 			}
 			else {
-				$WorkspaceDirectory = New-Item -Path $FolderName -Name $LAW.Name -ItemType "directory"
+				$WorkspaceDirectory = New-Item -Path $FolderName -Name $LogAnalyticsWorkspaceName -ItemType "directory"
 			}                                                           
 			
 			                              
@@ -205,14 +207,20 @@ Function Download-SentinelArtifacts {
 
             if($ArtifactType.Trim() -eq "Automation Rules") {
                 $ArtifactProvider = "automationRules"
-                $ArtifactKind = "Automation"
+                $ArtifactKind = "AutomationRules"
             }
             elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
                 $ArtifactProvider = "alertRules"
-                $ArtifactKind = "Analytics"
+                $ArtifactKind = "ScheduledAnalyticRules"
                 $WorkspaceArtifact.id = ""
                 $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
+            }
+            elseif ($ArtifactType.Trim() -eq "Parsers") {
+                $ArtifactProvider = "savedSearches"
+                $ArtifactKind = "SavedSearches"
+                $WorkspaceArtifact.PSObject.Properties.Remove('id')
+                $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2020-08-01" -Force
             }
             
             $ArtifactName= $WorkspaceArtifact.name
@@ -224,7 +232,7 @@ Function Download-SentinelArtifacts {
             $WorkspaceArtifact.PSObject.Properties.Remove('etag')
             $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
             
-            $armTemplate = @{
+            $armTemplate = [ordered]@{
                 '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
                 "contentVersion"= "1.0.0.0"
                 "parameters"= $templateParameters                                        
@@ -248,7 +256,7 @@ Function Download-SentinelArtifacts {
 
 #region MainFunctions
 
-function FixJsonIndentation ($jsonOutput) {
+Function FixJsonIndentation ($jsonOutput) {
     Try {
         $currentIndent = 0
         $tabSize = 4
@@ -306,7 +314,7 @@ Function Save-MicrosoftSentinelRule {
         [string]
         $Format,
         [Parameter(Mandatory = $true)]
-        [ValidateSet("Analytics", "Hunting", "LiveStream", "Automation")]
+        [ValidateSet("ScheduledAnalyticRules", "Hunting", "LiveStream", "AutomationRules", "SavedSearches")]
         [string]
         $Kind,
         [Parameter(Mandatory = $true)]
@@ -336,31 +344,6 @@ Function Save-MicrosoftSentinelRule {
 }
 
 Function Get-MicrosoftSentinelAlertRule {
-    <#
-      .SYNOPSIS
-      Get Microsoft Sentinel Alert Rules
-      .DESCRIPTION
-      With this function you can get the configuration of the Azure Sentinel Alert rule from Azure Sentinel
-      .PARAMETER SubscriptionId
-      Enter the subscription ID, if no subscription ID is provided then current AZContext subscription will be used
-      .PARAMETER WorkspaceName
-      Enter the Workspace name
-      .PARAMETER RuleName
-      Enter the name of the Alert rule
-      .PARAMETER Kind
-      The alert rule kind
-      .PARAMETER LastModified
-      Filter for rules modified after this date/time
-      .PARAMETER SkipPlaybook
-      Use SkipPlaybook switch to only return the rule properties, this skips the Playbook resolve step.
-      .EXAMPLE
-      Get-MicrosoftSentinelAlertRule -WorkspaceName "" -RuleName "",""
-      In this example you can get configuration of multiple alert rules in once
-      .EXAMPLE
-      Get-MicrosoftSentinelAlertRule -SubscriptionId "" -WorkspaceName "" -LastModified 2020-09-21
-      In this example you can get configuration of multiple alert rules only if modified after the 21st September 2020. The datetime must be in ISO8601 format.
-    #>
-
     [cmdletbinding()]
     param (        
         [Parameter(Mandatory)]        
@@ -407,46 +390,11 @@ Function Get-MicrosoftSentinelAlertRule {
     
 }
 
-Function Get-MicrosoftSentinelAutomationRule {
-    <#
-      .SYNOPSIS
-      Get Microsoft Sentinel Automation Rules
-      .DESCRIPTION
-      With this function you can get the configuration of the Azure Sentinel Automation rule from Microsoft Sentinel
-      .PARAMETER SubscriptionId
-      Enter the subscription ID, if no subscription ID is provided then current AZContext subscription will be used
-      .PARAMETER WorkspaceName
-      Enter the Workspace name
-      .PARAMETER RuleName
-      Enter the name of the Alert rule
-      .PARAMETER LastModified
-      Filter for rules modified after this date/time
-      .PARAMETER SkipPlaybook
-      Use SkipPlaybook switch to only return the rule properties, this skips the Playbook resolve step.
-      .EXAMPLE
-      Get-MicrosoftSentinelAutomationRule -WorkspaceName "" -RuleName "",""
-      In this example you can get configuration of multiple alert rules in once
-      .EXAMPLE
-      Get-MicrosoftSentinelAutomationRule -SubscriptionId "" -WorkspaceName "" -LastModified 2020-09-21
-      In this example you can get configuration of multiple alert rules only if modified after the 21st September 2020. The datetime must be in ISO8601 format.
-    #>
-
+Function Get-MicrosoftSentinelAutomationRule {   
     [cmdletbinding()]
     param (        
         [Parameter(Mandatory)]        
-        [string]$BaseUri,
-        
-        [Parameter(Mandatory = $false)]        
-        [string[]]$RuleName,
-
-        [Parameter(Mandatory = $false)]        
-        [Kind[]]$Kind,
-
-        [Parameter(Mandatory = $false)]        
-        [DateTime]$LastModified,
-
-        [Parameter(Mandatory = $false)]        
-        [switch]$SkipPlaybook
+        [string]$BaseUri      
     )
       
     $BaseUri = $ResourceManagerUrl.TrimEnd('/')+$BaseUri
@@ -477,6 +425,33 @@ Function Get-MicrosoftSentinelAutomationRule {
     
 }
 
+Function Get-MicrosoftSentinelParsers {   
+    [cmdletbinding()]
+    param (        
+        [Parameter(Mandatory)]        
+        [string]$BaseUri,
+
+        [Parameter(Mandatory)]        
+        [string]$LogAnalyticsWorkspaceName
+        
+        
+    )
+      
+    $BaseUri = $ResourceManagerUrl.TrimEnd('/')+$BaseUri    
+    $uri = "$BaseUri/savedSearches?api-version=2020-08-01"
+    Write-Log "End point $uri" -LogFileName $LogFileName -Severity Information
+    
+
+    try {
+        $Parsers = Invoke-RestMethod -Uri $uri -Method GET -Headers $APIHeaders
+    }
+    catch {
+        Write-Log $_ -LogFileName $LogFileName -Severity Error            
+        Write-Log "Unable to get parsers with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+    }  
+
+    return $Parsers.value
+}
 #endregion MainFunctions
 
 #region DriverProgram
@@ -494,8 +469,8 @@ else {
     $UpdateAzModules = $false
 }
 
-#Get-RequiredModules("Az.Accounts")
-#Get-RequiredModules("Az.OperationalInsights")
+Get-RequiredModules("Az.Accounts")
+Get-RequiredModules("Az.OperationalInsights")
 
 $TimeStamp = Get-Date -Format yyyyMMdd_HHmmss 
 $LogFileName = '{0}_{1}.csv' -f "Export_Microsoft_Sentinel_Rules", $TimeStamp
@@ -551,13 +526,12 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 $ResourceManagerUrl = $azContext.Environment.ResourceManagerUrl        
                 $APIHeaders = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
                 $APIHeaders.Add("Content-Type", "application/json")
-                $APIHeaders.Add("Authorization", "Bearer $AzureAccessToken")    
-
-                
+                $APIHeaders.Add("Authorization", "Bearer $AzureAccessToken")              
 
                 $SentinelArtifacts = New-Object -TypeName System.Collections.ArrayList
                 $SentinelArtifacts.Add("Scheduled Analytical Rules")
-                $SentinelArtifacts.Add("Automation Rules")                
+                $SentinelArtifacts.Add("Automation Rules")
+                $SentinelArtifacts.Add("Parsers")                
 
                 $ArtifactsToDownload = $SentinelArtifacts | Out-GridView -Title "Select Artifacts to download" -PassThru
                 
@@ -587,7 +561,7 @@ foreach($CurrentSubscription in $GetSubscriptions)
                             Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
                             Write-Log $_ -LogFileName $LogFileName -Severity Error                         
                         }
-                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $AutomationRules -ArtifactType $ArtifactToDownload.Trim()
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $AutomationRules -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)
                     }
                     elseif ($ArtifactToDownload.Trim() -eq "Scheduled Analytical Rules") {
                         try {
@@ -604,15 +578,21 @@ foreach($CurrentSubscription in $GetSubscriptions)
                                 $ScheduledAnalyticalRules.Add($AnalyticalRule)
                             }
                         }
-
-                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $ScheduledAnalyticalRules -ArtifactType $ArtifactToDownload.Trim()
-                        
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $ScheduledAnalyticalRules -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)                    
                     }
-
-                }              
-                
-            }                  
-
+                    elseif($ArtifactToDownload.Trim() -eq "Parsers") {
+                        try {
+                            $SavedSearches = Get-MicrosoftSentinelParsers -BaseUri $($LAW.ResourceId.ToString()) -LogAnalyticsWorkspaceName $($LAW.Name)
+                        }
+                        catch {
+                            $ErrorMessage = $_.Exception.Message
+                            Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
+                            Write-Log $_ -LogFileName $LogFileName -Severity Error                         
+                        }
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $SavedSearches -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)
+                    }
+                }               
+            }
         } 	
     }
     catch [Exception] {
