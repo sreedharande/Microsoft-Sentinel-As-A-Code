@@ -3,6 +3,7 @@ Export Microsoft Sentinel artifacts like Analytical Rules, Hunting Queries, Work
 - Currently supporting
 	- Scheduled Analytical Rules
 	- Automation Rules
+	- Parsers (Saved Searches - KQL Functions)
 
 # How to use
 1. Download the Tool  
