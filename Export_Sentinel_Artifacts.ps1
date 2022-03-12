@@ -212,6 +212,7 @@ Function Download-SentinelArtifacts {
             elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
                 $ArtifactProvider = "alertRules"
                 $ArtifactKind = "ScheduledAnalyticRules"
+                $alertName = $WorkspaceArtifact.Name
                 $WorkspaceArtifact.id = ""
                 $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
