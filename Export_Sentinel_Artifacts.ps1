@@ -15,7 +15,7 @@
     
     .NOTES
         AUTHOR: Sreedhar Ande and Javier Soriano
-        LASTEDIT: 3-8-2022
+        LASTEDIT: 3-14-2022
 
     .EXAMPLE
         .\Export_Sentinel_Artifacts.ps1 -TenantID xxxx 
@@ -155,12 +155,16 @@ Function Get-FolderName {
     Add-Type -AssemblyName System.Windows.Forms
     $FolderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
     $FolderBrowser.Description = 'Select the folder containing the data'
-    $result = $FolderBrowser.ShowDialog((New-Object System.Windows.Forms.Form -Property @{TopMost = $true; TopLevel = $true }))
-    if ($result -eq [Windows.Forms.DialogResult]::OK){
-        $FolderBrowser.SelectedPath
-    } else {
+    Try {
+        $result = $FolderBrowser.ShowDialog((New-Object System.Windows.Forms.Form -Property @{TopMost = $true; TopLevel = $true }))
+        if ($result -eq [Windows.Forms.DialogResult]::OK){
+            return $FolderBrowser.SelectedPath
+        } 
+    }
+    catch {
+        Write-Log "Error occured in Get-FolderName :$($_)" -LogFileName $LogFileName -Severity Error
         exit
-    }    
+    }
 } #end function Get-FolderName
 
 Function Clear-FileName {
