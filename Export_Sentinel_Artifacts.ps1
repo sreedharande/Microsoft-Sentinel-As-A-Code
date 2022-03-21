@@ -15,7 +15,7 @@
     
     .NOTES
         AUTHOR: Sreedhar Ande and Javier Soriano
-        LASTEDIT: 3-14-2022
+        LASTEDIT: 3-21-2022
 
     .EXAMPLE
         .\Export_Sentinel_Artifacts.ps1 -TenantID xxxx 
@@ -101,13 +101,17 @@ Function Get-RequiredModules {
                 Write-Log -Message "Installing $Module module to current user Scope" -LogFileName $LogFileName -Severity Warning
                 
                 Install-Module -Name $Module -Scope CurrentUser -Repository PSGallery -Force -AllowClobber
-                Import-Module -Name $Module -Force
+                $latestVersion = [Version](Get-Module -Name $Module).Version               
+                Write-Log -Message "Importing module $Module with version $latestVersion" -LogFileName $LogFileName -Severity Information
+                Import-Module -Name $Module -RequiredVersion $latestVersion -Force
             }
             else {
                 #Admin, install to all users																		   
                 Write-Log -Message "Installing the $Module module to all users" -LogFileName $LogFileName -Severity Warning
                 Install-Module -Name $Module -Repository PSGallery -Force -AllowClobber
-                Import-Module -Name $Module -Force
+                $latestVersion = [Version](Get-Module -Name $Module).Version               
+                Write-Log -Message "Importing module $Module with version $latestVersion" -LogFileName $LogFileName -Severity Information
+                Import-Module -Name $Module -RequiredVersion $latestVersion -Force
             }
         }
         else {
@@ -133,8 +137,9 @@ Function Get-RequiredModules {
                     }
                 }
                 else {
-                    Write-Log -Message "Importing module $Module" -LogFileName $LogFileName -Severity Information
-                    Import-Module -Name $Module -Force
+                    $latestVersion = [Version](Get-Module -Name $Module).Version               
+                    Write-Log -Message "Importing module $Module with version $latestVersion" -LogFileName $LogFileName -Severity Information
+                    Import-Module -Name $Module -RequiredVersion $latestVersion -Force
                 }
             }
             else {
@@ -162,7 +167,7 @@ Function Get-FolderName {
         } 
     }
     catch {
-        Write-Log "Error occured in Get-FolderName :$($_)" -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "Error occured in Get-FolderName :$($_)" -LogFileName $LogFileName -Severity Error
         exit
     }
 } #end function Get-FolderName
@@ -302,7 +307,7 @@ Function FixJsonIndentation ($jsonOutput) {
         return $newString
     }
     catch {
-        Write-Log "Error occured in FixJsonIndentation :$($_)" -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "Error occured in FixJsonIndentation :$($_)" -LogFileName $LogFileName -Severity Error
     }
 }
 Function Save-MicrosoftSentinelRule {
@@ -336,14 +341,14 @@ Function Save-MicrosoftSentinelRule {
                 }
             "Json" {
                 FixJsonIndentation -jsonOutput $Rule | Set-Content $OutputPathFileName -Force
-                Write-Log "Successfully exported $Name" -LogFileName $LogFileName -Severity Information
+                Write-Log -Message "Successfully exported $Name" -LogFileName $LogFileName -Severity Information
                 #$Rule | Out-File -FilePath $OutputPathFileName -Force 
             }
             Default {}
         }
     }
     else {
-        Write-Log "$($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "$($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
         throw
     }
 }
@@ -369,7 +374,7 @@ Function Get-MicrosoftSentinelAlertRule {
       
     $BaseUri = $ResourceManagerUrl.TrimEnd('/')+$BaseUri
     $uri = "$BaseUri/providers/Microsoft.SecurityInsights/alertRules?api-version=2021-09-01-preview"
-    Write-Log "End point $uri" -LogFileName $LogFileName -Severity Information
+    Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
     
 
     try {
@@ -377,20 +382,20 @@ Function Get-MicrosoftSentinelAlertRule {
     }
     catch {
         Write-Log $_ -LogFileName $LogFileName -Severity Error            
-        Write-Log "Unable to get alert rules with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "Unable to get alert rules with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
     }
     
     if ($alertRules.value -and $LastModified) {
-        Write-Log "Filtering for rules modified after $LastModified" -LogFileName $LogFileName -Severity Error        
+        Write-Log -Message "Filtering for rules modified after $LastModified" -LogFileName $LogFileName -Severity Error        
         $alertRules.value = $alertRules.value | Where-Object { $_.properties.lastModifiedUtc -gt $LastModified }
     }
     if ($alertRules.value) {
-        Write-Log "Found $($alertRules.value.count) Alert rules" -LogFileName $LogFileName -Severity Information
+        Write-Log -Message "Found $($alertRules.value.count) Alert rules" -LogFileName $LogFileName -Severity Information
         Write-Verbose "Found $($alertRules.value.count) Alert rules"
         return $alertRules.value        
     }
     else {
-        Write-Log "No Rules found on $BaseUri" -LogFileName $LogFileName -Severity Information
+        Write-Log -Message "No Rules found on $BaseUri" -LogFileName $LogFileName -Severity Information
     }
     
 }
@@ -404,7 +409,7 @@ Function Get-MicrosoftSentinelAutomationRule {
       
     $BaseUri = $ResourceManagerUrl.TrimEnd('/')+$BaseUri
     $uri = "$BaseUri/providers/Microsoft.SecurityInsights/automationRules?api-version=2021-09-01-preview"
-    Write-Log "End point $uri" -LogFileName $LogFileName -Severity Information
+    Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
     
 
     try {
@@ -412,20 +417,19 @@ Function Get-MicrosoftSentinelAutomationRule {
     }
     catch {
         Write-Log $_ -LogFileName $LogFileName -Severity Error            
-        Write-Log "Unable to get automation rules with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "Unable to get automation rules with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
     }
     
     if ($automationRules.value -and $LastModified) {
-        Write-Log "Filtering for rules modified after $LastModified" -LogFileName $LogFileName -Severity Error        
+        Write-Log -Message "Filtering for rules modified after $LastModified" -LogFileName $LogFileName -Severity Error        
         $automationRules.value = $automationRules.value | Where-Object { $_.properties.lastModifiedUtc -gt $LastModified }
     }
     if ($automationRules.value) {
-        Write-Log "Found $($automationRules.value.count) Automation rules" -LogFileName $LogFileName -Severity Information
-        Write-Verbose "Found $($automationRules.value.count) Automation rules"
+        Write-Log -Message "Found $($automationRules.value.count) Automation rules" -LogFileName $LogFileName -Severity Information        
         return $automationRules.value        
     }
     else {
-        Write-Log "No Automation Rules found on $BaseUri" -LogFileName $LogFileName -Severity Information
+        Write-Log -Message "No Automation Rules found on $BaseUri" -LogFileName $LogFileName -Severity Information
     }
     
 }
@@ -444,15 +448,15 @@ Function Get-MicrosoftSentinelParsers {
       
     $BaseUri = $ResourceManagerUrl.TrimEnd('/')+$BaseUri    
     $uri = "$BaseUri/savedSearches?api-version=2020-08-01"
-    Write-Log "End point $uri" -LogFileName $LogFileName -Severity Information
+    Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
     
 
     try {
         $Parsers = Invoke-RestMethod -Uri $uri -Method GET -Headers $APIHeaders
     }
     catch {
-        Write-Log $_ -LogFileName $LogFileName -Severity Error            
-        Write-Log "Unable to get parsers with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+        Write-Log -Message $_ -LogFileName $LogFileName -Severity Error            
+        Write-Log -Message "Unable to get parsers with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
     }  
 
     return $Parsers.value
@@ -482,20 +486,20 @@ $LogFileName = '{0}_{1}.csv' -f "Export_Microsoft_Sentinel_Rules", $TimeStamp
 
 # Check Powershell version, needs to be 5 or higher
 if ($host.Version.Major -lt 7) {
-    Write-Log "Supported PowerShell version for this script is 7" -LogFileName $LogFileName -Severity Error    
+    Write-Log -Message "Supported PowerShell version for this script is 7" -LogFileName $LogFileName -Severity Error    
     exit
 }
 
 #disconnect exiting connections and clearing contexts.
-Write-Log "Clearing existing Azure connection" -LogFileName $LogFileName -Severity Information
+Write-Log -Message "Clearing existing Azure connection" -LogFileName $LogFileName -Severity Information
     
 $null = Disconnect-AzAccount -ContextName 'MyAzContext' -ErrorAction SilentlyContinue
     
-Write-Log "Clearing existing Azure context `n" -LogFileName $LogFileName -Severity Information
+Write-Log -Message "Clearing existing Azure context `n" -LogFileName $LogFileName -Severity Information
     
 get-azcontext -ListAvailable | ForEach-Object{$_ | remove-azcontext -Force -Verbose | Out-Null} #remove all connected content
     
-Write-Log "Clearing of existing connection and context completed." -LogFileName $LogFileName -Severity Information
+Write-Log -Message "Clearing of existing connection and context completed." -LogFileName $LogFileName -Severity Information
 Try {
     #Connect to tenant with context name and save it to variable
     Connect-AzAccount -Tenant $TenantID -ContextName 'MyAzContext' -Force -ErrorAction Stop
@@ -504,7 +508,7 @@ Try {
     $GetSubscriptions = Get-AzSubscription -TenantId $TenantID | Where-Object {($_.state -eq 'enabled') } | Out-GridView -Title "Select Subscription to Use" -PassThru       
 }
 catch {    
-    Write-Log "Error When trying to connect to tenant : $($_)" -LogFileName $LogFileName -Severity Error
+    Write-Log -Message "Error When trying to connect to tenant : $($_)" -LogFileName $LogFileName -Severity Error
     exit    
 }
 
@@ -516,14 +520,14 @@ foreach($CurrentSubscription in $GetSubscriptions)
         #Set context for subscription being built
         $azContext = Set-AzContext -Subscription $CurrentSubscription.id
 
-        Write-Log "Working in Subscription: $($CurrentSubscription.Name)" -LogFileName $LogFileName -Severity Information
+        Write-Log -Message "Working in Subscription: $($CurrentSubscription.Name)" -LogFileName $LogFileName -Severity Information
 
         $LAWs = Get-AzOperationalInsightsWorkspace | Where-Object { $_.ProvisioningState -eq "Succeeded" } | Select-Object -Property Name, ResourceGroupName, Location, ResourceId | Out-GridView -Title "Select Log Analytics workspace" -PassThru
         if($null -eq $LAWs) {
-            Write-Log "No Log Analytics workspace found..." -LogFileName $LogFileName -Severity Error 
+            Write-Log -Message "No Log Analytics workspace found..." -LogFileName $LogFileName -Severity Error 
         }
         else {
-            Write-Log "Listing Log Analytics workspace" -LogFileName $LogFileName -Severity Information
+            Write-Log -Message "Listing Log Analytics workspace" -LogFileName $LogFileName -Severity Information
                     
             
             foreach($LAW in $LAWs) { 
@@ -542,7 +546,7 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 
                 $FolderName = Get-FolderName
                 if (Test-Path $FolderName) {
-                    Write-Log "$FolderName Path Exists" -LogFileName $LogFileName -Severity Information
+                    Write-Log -Message "$FolderName Path Exists" -LogFileName $LogFileName -Severity Information
                 }
                 else {
                     try {
@@ -550,8 +554,7 @@ foreach($CurrentSubscription in $GetSubscriptions)
                     }
                     catch {
                         $ErrorMessage = $_.Exception.Message
-                        Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
-                        Write-Log $_ -LogFileName $LogFileName -Severity Error                        
+                        Write-Log -Message $ErrorMessage -LogFileName $LogFileName -Severity Error                        
                         Break
                     }
                 }
