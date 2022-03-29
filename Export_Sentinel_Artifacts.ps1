@@ -217,6 +217,33 @@ Function Download-SentinelArtifacts {
             if($ArtifactType.Trim() -eq "Automation Rules") {
                 $ArtifactProvider = "automationRules"
                 $ArtifactKind = "AutomationRules"
+                $AutomationRuleName = $WorkspaceArtifact.Name
+                $WorkspaceArtifact.id = ""
+                $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/AutomationRules/$($AutomationRuleName)')]"
+                if ($WorkspaceArtifact.properties.triggeringLogic.conditions.Length -gt 0) {
+                    $ConditionValues = $WorkspaceArtifact.properties.triggeringLogic.conditions
+                    foreach ($PropertyVal in $ConditionValues) {                        
+                        $AssociatedAnalyticalRuleName = Split-Path $PropertyVal.conditionProperties.propertyValues -leaf
+                        $PropertyVal.conditionProperties.propertyValues = ""
+                        $PropertyVal.conditionProperties.propertyValues = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($AssociatedAnalyticalRuleName.Trim())')]"
+                    }
+                }
+                if ($WorkspaceArtifact.properties.actions.Length -gt 0 ) {
+                    $AutomationRuleActions = $WorkspaceArtifact.properties.actions
+                    foreach($RuleAction in $AutomationRuleActions) {
+                        if($RuleAction.actionType -ieq "RunPlaybook") {
+                            $LogicAppResourceId = $RuleAction.actionConfiguration.logicAppResourceId
+                            $RuleAction.actionConfiguration.logicAppResourceId = ""
+                            $LogicAppResourceId = Split-Path $LogicAppResourceId -leaf
+                            $RuleAction.actionConfiguration.logicAppResourceId = "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/resourceGroup().name/providers/Microsoft.Logic/workflows/', '$($LogicAppResourceId.Trim())')]"
+                        }
+                    }                   
+                }    
+                $WorkspaceArtifact.PSObject.Properties.Remove('etag')
+                $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedTimeUtc')
+                $WorkspaceArtifact.properties.PSObject.Properties.Remove('createdTimeUtc')
+                $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedBy')
+                $WorkspaceArtifact.properties.PSObject.Properties.Remove('createdBy')
             }
             elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
                 $ArtifactProvider = "alertRules"
@@ -225,24 +252,25 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact.id = ""
                 $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
+                $WorkspaceArtifact.PSObject.Properties.Remove('etag')
+                $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
             }
             elseif ($ArtifactType.Trim() -eq "Parsers") {
                 $ArtifactProvider = "savedSearches"
                 $ArtifactKind = "SavedSearches"
                 $WorkspaceArtifact.PSObject.Properties.Remove('id')
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2020-08-01" -Force
+                $WorkspaceArtifact.PSObject.Properties.Remove('etag')
+                $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
             }
             
             $ArtifactName= $WorkspaceArtifact.name
             $WorkspaceArtifact.name = ""
-            $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName)')]"
+            $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
             $WorkspaceArtifact.type = ""
             $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
-            
-            $WorkspaceArtifact.PSObject.Properties.Remove('etag')
-            $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
-            
-            $armTemplate = [ordered]@{
+                                    
+            $armTemplate = [ordered] @{
                 '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
                 "contentVersion"= "1.0.0.0"
                 "parameters"= $templateParameters                                        
