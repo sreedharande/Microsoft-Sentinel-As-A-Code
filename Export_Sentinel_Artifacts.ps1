@@ -188,31 +188,42 @@ Function Download-SentinelArtifacts {
     param(
         [parameter(Mandatory = $true)] $SentinelWorkspaceArtifacts,
         [parameter(Mandatory = $true)] $ArtifactType,
-        [parameter(Mandatory = $true)] $LogAnalyticsWorkspaceName
+        [parameter(Mandatory = $true)] $LogAnalyticsWorkspaceName,
+        [parameter(Mandatory = $true)] $ArtifactDestination       
     )
 
-    if ($SentinelWorkspaceArtifacts) {												  
+    if ($SentinelWorkspaceArtifacts) {	        											  
 		foreach ($WorkspaceArtifact in $SentinelWorkspaceArtifacts) {
-			if (Test-Path "$FolderName/$LogAnalyticsWorkspaceName") {
-				$WorkspaceDirectory = "$FolderName/$LogAnalyticsWorkspaceName"
-			}
-			else {
-				$WorkspaceDirectory = New-Item -Path $FolderName -Name $LogAnalyticsWorkspaceName -ItemType "directory"
-			}                                                           
-			
-			                              
-            if (Test-Path "$WorkspaceDirectory/$ArtifactType") {
-                $LocalArtifactsDirectory = "$WorkspaceDirectory/$ArtifactType"
+            if ($ArtifactDestination -ieq "Local") {
+                if (Test-Path "$FolderName/$LogAnalyticsWorkspaceName") {
+                    $WorkspaceDirectory = "$FolderName/$LogAnalyticsWorkspaceName"
+                }
+                else {
+                    $WorkspaceDirectory = New-Item -Path $FolderName -Name $LogAnalyticsWorkspaceName -ItemType "directory"
+                }                                                           
+                
+                                            
+                if (Test-Path "$WorkspaceDirectory/$ArtifactType") {
+                    $LocalArtifactsDirectory = "$WorkspaceDirectory/$ArtifactType"
+                }
+                else {
+                    $LocalArtifactsDirectory = New-Item -Path $WorkspaceDirectory -Name $ArtifactType -ItemType "directory"
+                }
             }
-            else {
-                $LocalArtifactsDirectory = New-Item -Path $WorkspaceDirectory -Name $ArtifactType -ItemType "directory"
-            }
-            
+
             $templateParameters = @{}
 
             $templateParameters.Add("workspace", @{                                        
                 "type"= "String"
+                "metadata"     = @{
+                    "description" = "Log Analytics Workspace Name";
+                }
             })
+
+            $ArtifactDisplayName = $WorkspaceArtifact.properties.displayName
+            if([string]::IsNullOrEmpty($ArtifactDisplayName)) {
+                $ArtifactDisplayName = $WorkspaceArtifact.Id
+            }
 
             if($ArtifactType.Trim() -eq "Automation Rules") {
                 $ArtifactProvider = "automationRules"
@@ -263,33 +274,130 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact.PSObject.Properties.Remove('etag')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
             }
-            
-            $ArtifactName= $WorkspaceArtifact.name
-            $WorkspaceArtifact.name = ""
-            $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
-            $WorkspaceArtifact.type = ""
-            $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
-                                    
+            elseif ($ArtifactType.Trim() -eq "Workbooks") {
+                $ArtifactProvider = "workbooks"
+                $ArtifactKind = "Workbooks"   
+                $workbookId = New-Guid              
+                
+                #Add formattedTimeNow parameter since workbooks exist                
+                $templateParameters.Add("formattedTimeNow", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "[utcNow('g')]"
+                    "metadata"     = @{
+                        "description" = "Appended to workbook displayNames to make them unique";
+                    }
+                })
+
+                $templateParameters.Add("workbook-id", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "$workbookId"
+                    "metadata"     = @{
+                        "description" = "Unique id for the workbook";
+                    }
+                })
+
+                $templateParameters.Add("workbook-name", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "$ArtifactDisplayName"
+                    "metadata"     = @{
+                        "description" = "Name for the workbook";
+                    }
+                })
+        
+                # Create Workbook Resource Object
+                $newWorkbook = [PSCustomObject]@{
+                    type       = "Microsoft.Insights/workbooks";
+                    name       = "[parameters('workbook-id')]";
+                    location   = "[resourceGroup().location]";
+                    kind       = "shared";
+                    apiVersion = "2020-02-12";
+                    properties = [PSCustomObject] @{
+                        displayName    = "[concat(parameters('workbook-name'), ' - ', parameters('formattedTimeNow'))]";
+                        serializedData = $WorkspaceArtifact.properties.serializedData;
+                        version        = "1.0";
+                        sourceId       = "[concat(resourceGroup().id, '/providers/Microsoft.OperationalInsights/workspaces/',parameters('workspace'))]";
+                        category       = "sentinel"; 
+                        etag           = "*"
+                    }
+                }
+
+                $WorkspaceArtifact = $newWorkbook            
+            }
+                                                
             $armTemplate = [ordered] @{
                 '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
                 "contentVersion"= "1.0.0.0"
                 "parameters"= $templateParameters                                        
                 "resources"= @($WorkspaceArtifact)
-            }                                 
-                            
-            $ArtifactDisplayName = $WorkspaceArtifact.properties.displayName
-            if([string]::IsNullOrEmpty($ArtifactDisplayName)) {
-                $ArtifactDisplayName = $WorkspaceArtifact.Id
-            }          
+            }                         
+                    
             $armTemplateOutput = $armTemplate | ConvertTo-Json -Depth 100   
             $armTemplateOutput = $armTemplateOutput -replace "\\u0027", "'"    							
-            Save-MicrosoftSentinelRule -Rule $armTemplateOutput -RuleName $ArtifactDisplayName -Format "Json" -Kind $ArtifactKind -Path $LocalArtifactsDirectory
+            if ($ArtifactDestination -ieq "Local") {
+                Save-MicrosoftSentinelRule -Rule $armTemplateOutput -RuleName $ArtifactDisplayName -Format "Json" -Kind $ArtifactKind -Path $LocalArtifactsDirectory
+            }
+            else {
+                $GitHubArtifact = FixJsonIndentation -jsonOutput $armTemplateOutput
+                Upload-ToGitHub -GitHubArtifact $GitHubArtifact -GitDirectory $LogAnalyticsWorkspaceName -ArtifactType $ArtifactKind -ArtifactName $ArtifactDisplayName
+            }
                                 
 		}
 	}
 
 }
 
+
+Function Get-GitHubDetails {
+    param(
+        [parameter(Mandatory = $true)] $RepoName,
+        [parameter(Mandatory = $true)] $Branch,
+        [parameter(Mandatory = $true)] $PATToken
+    )
+    $global:RepoName = $RepoName
+    $global:Branch = $Branch
+    $global:PATToken = $PATToken
+    #1. Get content from Repo's Folder based on Artifact type (Analytical Rule, Parsers, AutomationRules)
+    #2. Compare the names from GitHub repo to Workspace
+    #3. If existing - move to archive - else upload
+    #4. Create Artifact folders in GitHub
+    
+}
+
+Function Upload-ToGitHub {
+    param(        
+        [parameter(Mandatory = $true)] $GitHubArtifact,
+        [parameter(Mandatory = $true)] $GitDirectory,
+        [parameter(Mandatory = $true)] $ArtifactType,
+        [parameter(Mandatory = $true)] $ArtifactName
+    )
+    TRY {    
+        $repoURL = "https://api.github.com/repos/$RepoName/contents/$GitDirectory/$($ArtifactType)/$($ArtifactName).json?ref=$Branch"
+        
+        $header = @{
+            "Authorization" = "token $PATToken"
+            "Content-Type" = "application/json"
+        }
+        
+        $EncodedArtifact = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($GitHubArtifact))
+
+        $GitBody = @{
+            "branch" = $Branch
+            "content" = $EncodedArtifact
+            "message" = "This has been committed by the Export-Content-GitHub Logic App."
+        }
+
+        Try {
+            $response = Invoke-RestMethod -Method Put -Headers $header -URI $repoURL -Body $GitBody
+            Write-Log -Message "$($response.StatusCode)" -LogFileName $LogFileName -Severity Information
+        }
+        catch {
+            Write-Log -Message "Error occured in Upload-ToGitHub :$($_)" -LogFileName $LogFileName -Severity Error
+        }
+    }
+    catch {
+        Write-Log -Message "Error occured in Upload-ToGitHub :$($_)" -LogFileName $LogFileName -Severity Error
+    }
+}
 #endregion
 
 #region MainFunctions
@@ -338,6 +446,7 @@ Function FixJsonIndentation ($jsonOutput) {
         Write-Log -Message "Error occured in FixJsonIndentation :$($_)" -LogFileName $LogFileName -Severity Error
     }
 }
+
 Function Save-MicrosoftSentinelRule {
     [CmdletBinding()]
     param (
@@ -352,7 +461,7 @@ Function Save-MicrosoftSentinelRule {
         [string]
         $Format,
         [Parameter(Mandatory = $true)]
-        [ValidateSet("ScheduledAnalyticRules", "Hunting", "LiveStream", "AutomationRules", "SavedSearches")]
+        [ValidateSet("ScheduledAnalyticRules", "Hunting", "LiveStream", "AutomationRules", "SavedSearches", "Workbooks")]
         [string]
         $Kind,
         [Parameter(Mandatory = $true)]
@@ -365,8 +474,8 @@ Function Save-MicrosoftSentinelRule {
         $OutputPathFileName = Join-Path -Path $Path -ChildPath "$($Name).$($Kind.ToLowerInvariant()).rule.$($Format.ToLowerInvariant())"
         switch ($Format) {
             "Yaml" { 
-                $Rule | ConvertTo-Yaml -OutFile $OutputPathFileName -Force
-                }
+                    $Rule | ConvertTo-Yaml -OutFile $OutputPathFileName -Force
+            }
             "Json" {
                 FixJsonIndentation -jsonOutput $Rule | Set-Content $OutputPathFileName -Force
                 Write-Log -Message "Successfully exported $Name" -LogFileName $LogFileName -Severity Information
@@ -424,8 +533,7 @@ Function Get-MicrosoftSentinelAlertRule {
     }
     else {
         Write-Log -Message "No Rules found on $BaseUri" -LogFileName $LogFileName -Severity Information
-    }
-    
+    }    
 }
 
 Function Get-MicrosoftSentinelAutomationRule {   
@@ -488,6 +596,34 @@ Function Get-MicrosoftSentinelParsers {
     }  
 
     return $Parsers.value
+}
+
+Function Get-MicrosoftSentinelWorkbooks {
+[cmdletbinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$BaseUri
+    )
+    
+    $BaseUri = "https://management.azure.com/subscriptions/" + $CurrentSubscription.id + "/resourcegroups/admin"
+    $uri = "$BaseUri/providers/microsoft.insights/workbooks?api-version=2022-04-01&category=sentinel&canfetchcontent=true"
+
+    Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
+    try {
+        $Workbooks = Invoke-RestMethod -Uri $uri -Method GET -Headers $APIHeaders
+    }
+    catch {
+        Write-Log -Message $_ -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "Unable to get workbooks with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+    }
+    if ($Workbooks.value) {
+        Write-Log -Message "Found $($Workbooks.value.count) Workbooks" -LogFileName $LogFileName -Severity Information
+        return $Workbooks.value
+    }
+    else {
+        Write-Log -Message "No Workbooks found on $BaseUri" -LogFileName $LogFileName -Severity Information
+    }
+    return $Workbooks.value
 }
 #endregion MainFunctions
 
@@ -568,24 +704,37 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 $SentinelArtifacts = New-Object -TypeName System.Collections.ArrayList
                 $SentinelArtifacts.Add("Scheduled Analytical Rules")
                 $SentinelArtifacts.Add("Automation Rules")
-                $SentinelArtifacts.Add("Parsers")                
-
+                $SentinelArtifacts.Add("Parsers")        
+                $SentinelArtifacts.Add("Workbooks")
+                
                 $ArtifactsToDownload = $SentinelArtifacts | Out-GridView -Title "Select Artifacts to download" -PassThru
                 
-                $FolderName = Get-FolderName
-                if (Test-Path $FolderName) {
-                    Write-Log -Message "$FolderName Path Exists" -LogFileName $LogFileName -Severity Information
-                }
-                else {
-                    try {
-                        $null = New-Item -Path $FolderName -Force -ItemType Directory -ErrorAction Stop
+                $SaveQuestion = "Please choose destination for artifacts"
+                $SaveQuestionChoices = New-Object Collections.ObjectModel.Collection[Management.Automation.Host.ChoiceDescription]
+                $SaveQuestionChoices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList '&Local'))
+                $SaveQuestionChoices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList '&GitHub'))
+
+                $SaveQuestionChoicesDecision = $Host.UI.PromptForChoice($title, $SaveQuestion, $SaveQuestionChoices, 1)
+                if ($SaveQuestionChoicesDecision -eq 0) {
+                    $FolderName = Get-FolderName
+                    $ArtifactDestination = "Local"
+                    if (Test-Path $FolderName) {
+                        Write-Log -Message "$FolderName Path Exists" -LogFileName $LogFileName -Severity Information
                     }
-                    catch {
-                        $ErrorMessage = $_.Exception.Message
-                        Write-Log -Message $ErrorMessage -LogFileName $LogFileName -Severity Error                        
-                        Break
+                    else {
+                        try {
+                            $null = New-Item -Path $FolderName -Force -ItemType Directory -ErrorAction Stop
+                        }
+                        catch {
+                            $ErrorMessage = $_.Exception.Message
+                            Write-Log -Message $ErrorMessage -LogFileName $LogFileName -Severity Error                        
+                            Break
+                        }
                     }
                 }
+                else {    
+                    $ArtifactDestination = "GitHub"                                    
+                }               
 
                 foreach($ArtifactToDownload in $ArtifactsToDownload) {
                     if($ArtifactToDownload.Trim() -eq "Automation Rules") {
@@ -597,7 +746,7 @@ foreach($CurrentSubscription in $GetSubscriptions)
                             Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
                             Write-Log $_ -LogFileName $LogFileName -Severity Error                         
                         }
-                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $AutomationRules -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $AutomationRules -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name) -ArtifactDestination $ArtifactDestination
                     }
                     elseif ($ArtifactToDownload.Trim() -eq "Scheduled Analytical Rules") {
                         try {
@@ -614,7 +763,7 @@ foreach($CurrentSubscription in $GetSubscriptions)
                                 $ScheduledAnalyticalRules.Add($AnalyticalRule)
                             }
                         }
-                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $ScheduledAnalyticalRules -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)                    
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $ScheduledAnalyticalRules -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name) -ArtifactDestination $ArtifactDestination                   
                     }
                     elseif($ArtifactToDownload.Trim() -eq "Parsers") {
                         try {
@@ -625,7 +774,18 @@ foreach($CurrentSubscription in $GetSubscriptions)
                             Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
                             Write-Log $_ -LogFileName $LogFileName -Severity Error                         
                         }
-                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $SavedSearches -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $SavedSearches -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name) -ArtifactDestination $ArtifactDestination
+                    }
+                    elseif($ArtifactToDownload.Trim() -eq "Workbooks") {
+                        try {
+                            $Workbooks = Get-MicrosoftSentinelWorkbooks -BaseUri $($LAW.ResourceId.ToString())
+                        }
+                        catch {
+                            $ErrorMessage = $_.Exception.Message
+                            Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
+                            Write-Log $_ -LogFileName $LogFileName -Severity Error
+                        }
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $Workbooks -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name) -ArtifactDestination $ArtifactDestination
                     }
                 }               
             }
