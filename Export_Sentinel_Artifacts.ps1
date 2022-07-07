@@ -220,7 +220,8 @@ Function Download-SentinelArtifacts {
 			$ArtifactDisplayName = $WorkspaceArtifact.properties.displayName
             if([string]::IsNullOrEmpty($ArtifactDisplayName)) {
                 $ArtifactDisplayName = $WorkspaceArtifact.Id
-            }																
+            }		
+
             if($ArtifactType.Trim() -eq "Automation Rules") {
                 $ArtifactProvider = "automationRules"
                 $ArtifactKind = "AutomationRules"
@@ -251,6 +252,14 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('createdTimeUtc')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedBy')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('createdBy')
+
+                $ArtifactName= $WorkspaceArtifact.name
+                $WorkspaceArtifact.name = ""
+                $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
+                $WorkspaceArtifact.type = ""
+                $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
+                 
+            
             }
             elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
                 $ArtifactProvider = "alertRules"
@@ -261,6 +270,13 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
                 $WorkspaceArtifact.PSObject.Properties.Remove('etag')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
+                
+                $ArtifactName= $WorkspaceArtifact.name
+                $WorkspaceArtifact.name = ""
+                $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
+                $WorkspaceArtifact.type = ""
+                $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
+                 
             }
             elseif ($ArtifactType.Trim() -eq "Parsers") {
                 $ArtifactProvider = "savedSearches"
@@ -269,6 +285,13 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2020-08-01" -Force
                 $WorkspaceArtifact.PSObject.Properties.Remove('etag')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
+                
+                $ArtifactName= $WorkspaceArtifact.name
+                $WorkspaceArtifact.name = ""
+                $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
+                $WorkspaceArtifact.type = ""
+                $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
+                 
             }
 			elseif ($ArtifactType.Trim() -eq "Workbooks") {
                 $ArtifactProvider = "workbooks"
@@ -319,13 +342,7 @@ Function Download-SentinelArtifacts {
 
                 $WorkspaceArtifact = $newWorkbook            
             }
-            
-            $ArtifactName= $WorkspaceArtifact.name
-            $WorkspaceArtifact.name = ""
-            $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
-            $WorkspaceArtifact.type = ""
-            $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
-                                    
+                                           
             $armTemplate = [ordered] @{
                 '$schema'= "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
                 "contentVersion"= "1.0.0.0"
