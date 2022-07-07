@@ -5,17 +5,17 @@
 	SOFTWARE.
 
     .SYNOPSIS
-        This PowerShell script exports Scheduled Analytic Rules and Automation Rules
+        This PowerShell script exports Scheduled Analytic Rules, Automation Rules, Parsers and Workbooks
 
     .DESCRIPTION
-        Exports Scheduled Analytic Rules from the selected Microsoft Sentinel Workspace
+        Exports Microsoft Sentinel Artifacts as ARM templates from the selected Microsoft Sentinel Workspace
     
     .PARAMETER TenantID
         Enter the TenantID (required)
     
     .NOTES
         AUTHOR: Sreedhar Ande and Javier Soriano
-        LASTEDIT: 3-21-2022
+        LASTEDIT: 07-05-2022
 
     .EXAMPLE
         .\Export_Sentinel_Artifacts.ps1 -TenantID xxxx 
@@ -212,8 +212,15 @@ Function Download-SentinelArtifacts {
 
             $templateParameters.Add("workspace", @{                                        
                 "type"= "String"
+				"metadata"     = @{
+                    "description" = "Log Analytics Workspace Name";
+                }			   
             })
 
+			$ArtifactDisplayName = $WorkspaceArtifact.properties.displayName
+            if([string]::IsNullOrEmpty($ArtifactDisplayName)) {
+                $ArtifactDisplayName = $WorkspaceArtifact.Id
+            }																
             if($ArtifactType.Trim() -eq "Automation Rules") {
                 $ArtifactProvider = "automationRules"
                 $ArtifactKind = "AutomationRules"
@@ -263,6 +270,55 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact.PSObject.Properties.Remove('etag')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
             }
+			elseif ($ArtifactType.Trim() -eq "Workbooks") {
+                $ArtifactProvider = "workbooks"
+                $ArtifactKind = "Workbooks"   
+                $workbookId = New-Guid              
+                
+                #Add formattedTimeNow parameter since workbooks exist                
+                $templateParameters.Add("formattedTimeNow", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "[utcNow('g')]"
+                    "metadata"     = @{
+                        "description" = "Appended to workbook displayNames to make them unique";
+                    }
+                })
+
+                $templateParameters.Add("workbook-id", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "$workbookId"
+                    "metadata"     = @{
+                        "description" = "Unique id for the workbook";
+                    }
+                })
+
+                $templateParameters.Add("workbook-name", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "$ArtifactDisplayName"
+                    "metadata"     = @{
+                        "description" = "Name for the workbook";
+                    }
+                })
+        
+                # Create Workbook Resource Object
+                $newWorkbook = [PSCustomObject]@{
+                    type       = "Microsoft.Insights/workbooks";
+                    name       = "[parameters('workbook-id')]";
+                    location   = "[resourceGroup().location]";
+                    kind       = "shared";
+                    apiVersion = "2020-02-12";
+                    properties = [PSCustomObject] @{
+                        displayName    = "[concat(parameters('workbook-name'), ' - ', parameters('formattedTimeNow'))]";
+                        serializedData = $WorkspaceArtifact.properties.serializedData;
+                        version        = "1.0";
+                        sourceId       = "[concat(resourceGroup().id, '/providers/Microsoft.OperationalInsights/workspaces/',parameters('workspace'))]";
+                        category       = "sentinel"; 
+                        etag           = "*"
+                    }
+                }
+
+                $WorkspaceArtifact = $newWorkbook            
+            }
             
             $ArtifactName= $WorkspaceArtifact.name
             $WorkspaceArtifact.name = ""
@@ -277,10 +333,10 @@ Function Download-SentinelArtifacts {
                 "resources"= @($WorkspaceArtifact)
             }                                 
                             
-            $ArtifactDisplayName = $WorkspaceArtifact.properties.displayName
-            if([string]::IsNullOrEmpty($ArtifactDisplayName)) {
-                $ArtifactDisplayName = $WorkspaceArtifact.Id
-            }          
+                   
+															   
+															
+					   
             $armTemplateOutput = $armTemplate | ConvertTo-Json -Depth 100   
             $armTemplateOutput = $armTemplateOutput -replace "\\u0027", "'"    							
             Save-MicrosoftSentinelRule -Rule $armTemplateOutput -RuleName $ArtifactDisplayName -Format "Json" -Kind $ArtifactKind -Path $LocalArtifactsDirectory
@@ -352,7 +408,7 @@ Function Save-MicrosoftSentinelRule {
         [string]
         $Format,
         [Parameter(Mandatory = $true)]
-        [ValidateSet("ScheduledAnalyticRules", "Hunting", "LiveStream", "AutomationRules", "SavedSearches")]
+        [ValidateSet("ScheduledAnalyticRules", "Hunting", "LiveStream", "AutomationRules", "SavedSearches", "Workbooks")]
         [string]
         $Kind,
         [Parameter(Mandatory = $true)]
@@ -426,6 +482,34 @@ Function Get-MicrosoftSentinelAlertRule {
         Write-Log -Message "No Rules found on $BaseUri" -LogFileName $LogFileName -Severity Information
     }
     
+}
+
+Function Get-MicrosoftSentinelWorkbooks {
+[cmdletbinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$BaseUri
+    )
+    
+    $BaseUri = "https://management.azure.com/subscriptions/" + $CurrentSubscription.id + "/resourcegroups/admin"
+    $uri = "$BaseUri/providers/microsoft.insights/workbooks?api-version=2022-04-01&category=sentinel&canfetchcontent=true"
+
+    Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
+    try {
+        $Workbooks = Invoke-RestMethod -Uri $uri -Method GET -Headers $APIHeaders
+    }
+    catch {
+        Write-Log -Message $_ -LogFileName $LogFileName -Severity Error
+        Write-Log -Message "Unable to get workbooks with error code: $($_.Exception.Message)" -LogFileName $LogFileName -Severity Error
+    }
+    if ($Workbooks.value) {
+        Write-Log -Message "Found $($Workbooks.value.count) Workbooks" -LogFileName $LogFileName -Severity Information
+        return $Workbooks.value
+    }
+    else {
+        Write-Log -Message "No Workbooks found on $BaseUri" -LogFileName $LogFileName -Severity Information
+    }
+    return $Workbooks.value
 }
 
 Function Get-MicrosoftSentinelAutomationRule {   
@@ -568,7 +652,8 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 $SentinelArtifacts = New-Object -TypeName System.Collections.ArrayList
                 $SentinelArtifacts.Add("Scheduled Analytical Rules")
                 $SentinelArtifacts.Add("Automation Rules")
-                $SentinelArtifacts.Add("Parsers")                
+                $SentinelArtifacts.Add("Parsers")     
+                $SentinelArtifacts.Add("Workbooks")          
 
                 $ArtifactsToDownload = $SentinelArtifacts | Out-GridView -Title "Select Artifacts to download" -PassThru
                 
@@ -626,6 +711,17 @@ foreach($CurrentSubscription in $GetSubscriptions)
                             Write-Log $_ -LogFileName $LogFileName -Severity Error                         
                         }
                         Download-SentinelArtifacts -SentinelWorkspaceArtifacts $SavedSearches -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)
+                    }
+					elseif($ArtifactToDownload.Trim() -eq "Workbooks") {
+                        try {
+                            $Workbooks = Get-MicrosoftSentinelWorkbooks -BaseUri $($LAW.ResourceId.ToString())
+                        }
+                        catch {
+                            $ErrorMessage = $_.Exception.Message
+                            Write-Log $ErrorMessage -LogFileName $LogFileName -Severity Error
+                            Write-Log $_ -LogFileName $LogFileName -Severity Error
+                        }
+                        Download-SentinelArtifacts -SentinelWorkspaceArtifacts $Workbooks -ArtifactType $ArtifactToDownload.Trim() -LogAnalyticsWorkspaceName $($LAW.Name)
                     }
                 }               
             }
