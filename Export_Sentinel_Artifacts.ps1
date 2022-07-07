@@ -652,7 +652,8 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 $SentinelArtifacts = New-Object -TypeName System.Collections.ArrayList
                 $SentinelArtifacts.Add("Scheduled Analytical Rules")
                 $SentinelArtifacts.Add("Automation Rules")
-                $SentinelArtifacts.Add("Parsers")                
+                $SentinelArtifacts.Add("Parsers")     
+                $SentinelArtifacts.Add("Workbooks")          
 
                 $ArtifactsToDownload = $SentinelArtifacts | Out-GridView -Title "Select Artifacts to download" -PassThru
                 
