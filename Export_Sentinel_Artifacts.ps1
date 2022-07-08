@@ -225,29 +225,48 @@ Function Download-SentinelArtifacts {
             if($ArtifactType.Trim() -eq "Automation Rules") {
                 $ArtifactProvider = "automationRules"
                 $ArtifactKind = "AutomationRules"
-                $AutomationRuleName = $WorkspaceArtifact.Name
-                $WorkspaceArtifact.id = ""
-                $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/AutomationRules/$($AutomationRuleName)')]"
+
+                $templateParameters.Add("AutomationRuleDisplayName", @{                                        
+                    "type"= "String"
+                    "defaultValue" = "$ArtifactDisplayName"
+                    "metadata"     = @{
+                        "description" = "AutomationRuleDisplayName";
+                    }
+                })
+
                 if ($WorkspaceArtifact.properties.triggeringLogic.conditions.Length -gt 0) {
                     $ConditionValues = $WorkspaceArtifact.properties.triggeringLogic.conditions
-                    foreach ($PropertyVal in $ConditionValues) {                        
-                        $AssociatedAnalyticalRuleName = Split-Path $PropertyVal.conditionProperties.propertyValues -leaf
-                        $PropertyVal.conditionProperties.propertyValues = ""
-                        $PropertyVal.conditionProperties.propertyValues = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($AssociatedAnalyticalRuleName.Trim())')]"
+                    foreach ($PropertyVal in $ConditionValues) {  
+                        $ConditionPropValues = $PropertyVal.conditionProperties.propertyValues
+                        foreach ($PropVal in $ConditionPropValues) { 
+                            if ($PropVal.Contains("alertRules")) {                   
+                                $AssociatedAnalyticalRuleName = Split-Path $PropVal -leaf
+                                $PropertyVal.conditionProperties.propertyValues = ""
+                                $PropArrayVal = @()
+                                $PropArrayVal += "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers/', 'Microsoft.SecurityInsights'),'/alertRules/$($AssociatedAnalyticalRuleName.Trim())')]"
+                                $PropertyVal.conditionProperties.propertyValues = $PropArrayVal
+                            }
+                        }
                     }
                 }
+                             
                 if ($WorkspaceArtifact.properties.actions.Length -gt 0 ) {
                     $AutomationRuleActions = $WorkspaceArtifact.properties.actions
                     foreach($RuleAction in $AutomationRuleActions) {
                         if($RuleAction.actionType -ieq "RunPlaybook") {
                             $LogicAppResourceId = $RuleAction.actionConfiguration.logicAppResourceId
                             $RuleAction.actionConfiguration.logicAppResourceId = ""
+                            if($RuleAction.actionConfiguration.tenantId) {
+                                $RuleAction.actionConfiguration.tenantId = ""
+                                $RuleAction.actionConfiguration.tenantId = "[subscription().tenantId]"
+                            }
                             $LogicAppResourceId = Split-Path $LogicAppResourceId -leaf
-                            $RuleAction.actionConfiguration.logicAppResourceId = "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/resourceGroup().name/providers/Microsoft.Logic/workflows/', '$($LogicAppResourceId.Trim())')]"
+                            $RuleAction.actionConfiguration.logicAppResourceId = "[concat(subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroup().name), '/providers/Microsoft.Logic/workflows/', '$($LogicAppResourceId.Trim())')]"                            
                         }
                     }                   
                 }    
                 $WorkspaceArtifact.PSObject.Properties.Remove('etag')
+                $WorkspaceArtifact.PSObject.Properties.Remove('id')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedTimeUtc')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('createdTimeUtc')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedBy')
@@ -255,11 +274,13 @@ Function Download-SentinelArtifacts {
 
                 $ArtifactName= $WorkspaceArtifact.name
                 $WorkspaceArtifact.name = ""
-                $WorkspaceArtifact.name = "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/$($ArtifactName.Trim())')]"
+                $WorkspaceArtifact.name = $($ArtifactName.Trim())
                 $WorkspaceArtifact.type = ""
-                $WorkspaceArtifact.type = "Microsoft.OperationalInsights/workspaces/providers/$ArtifactProvider"                                
-                 
-            
+                $WorkspaceArtifact.type = "Microsoft.SecurityInsights/$ArtifactProvider"
+                $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2019-01-01-preview" -Force
+                $WorkspaceArtifact | Add-Member -NotePropertyName "scope" -NotePropertyValue "[concat('Microsoft.OperationalInsights/workspaces/', parameters('workspace'))]" -Force
+                $WorkspaceArtifact.properties.displayName = ""
+                $WorkspaceArtifact.properties.displayName = "[parameter('AutomationRuleDisplayName')]"
             }
             elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
                 $ArtifactProvider = "alertRules"
