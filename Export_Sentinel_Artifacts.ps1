@@ -529,7 +529,7 @@ Function Get-MicrosoftSentinelWorkbooks {
         [string]$BaseUri
     )
     
-    $BaseUri = "https://management.azure.com/subscriptions/" + $CurrentSubscription.id + "/resourcegroups/admin"
+    $BaseUri = "https://management.azure.com/subscriptions/" + $CurrentSubscription.id + "/resourcegroups/" +$ResourceGroupName
     $uri = "$BaseUri/providers/microsoft.insights/workbooks?api-version=2022-04-01&category=sentinel&canfetchcontent=true"
 
     Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
@@ -685,7 +685,9 @@ foreach($CurrentSubscription in $GetSubscriptions)
                 $ResourceManagerUrl = $azContext.Environment.ResourceManagerUrl        
                 $APIHeaders = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
                 $APIHeaders.Add("Content-Type", "application/json")
-                $APIHeaders.Add("Authorization", "Bearer $AzureAccessToken")              
+                $APIHeaders.Add("Authorization", "Bearer $AzureAccessToken")      
+                $ResourceGroupName = $LAW.ResourceGroupName
+        
 
                 $SentinelArtifacts = New-Object -TypeName System.Collections.ArrayList
                 $SentinelArtifacts.Add("Scheduled Analytical Rules")
