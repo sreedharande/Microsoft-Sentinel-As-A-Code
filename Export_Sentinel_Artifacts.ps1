@@ -15,7 +15,7 @@
     
     .NOTES
         AUTHOR: Sreedhar Ande and Javier Soriano
-        LASTEDIT: 07-05-2022
+        LASTEDIT: 09-06-2022
 
     .EXAMPLE
         .\Export_Sentinel_Artifacts.ps1 -TenantID xxxx 
@@ -280,7 +280,7 @@ Function Download-SentinelArtifacts {
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2019-01-01-preview" -Force
                 $WorkspaceArtifact | Add-Member -NotePropertyName "scope" -NotePropertyValue "[concat('Microsoft.OperationalInsights/workspaces/', parameters('workspace'))]" -Force
                 $WorkspaceArtifact.properties.displayName = ""
-                $WorkspaceArtifact.properties.displayName = "[parameter('AutomationRuleDisplayName')]"
+                $WorkspaceArtifact.properties.displayName = "[parameters('AutomationRuleDisplayName')]"
             }
             elseif ($ArtifactType.Trim() -eq "Scheduled Analytical Rules") {
                 $ArtifactProvider = "alertRules"
@@ -558,7 +558,7 @@ Function Get-MicrosoftSentinelAutomationRule {
     )
       
     $BaseUri = $ResourceManagerUrl.TrimEnd('/')+$BaseUri
-    $uri = "$BaseUri/providers/Microsoft.SecurityInsights/automationRules?api-version=2021-09-01-preview"
+    $uri = "$BaseUri/providers/Microsoft.SecurityInsights/automationRules?api-version=2022-07-01-preview"
     Write-Log -Message "End point $uri" -LogFileName $LogFileName -Severity Information
     
 
