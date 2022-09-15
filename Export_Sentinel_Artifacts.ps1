@@ -243,7 +243,7 @@ Function Download-SentinelArtifacts {
                                 $AssociatedAnalyticalRuleName = Split-Path $PropVal -leaf
                                 $PropertyVal.conditionProperties.propertyValues = ""
                                 $PropArrayVal = @()
-                                $PropArrayVal += "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers/', 'Microsoft.SecurityInsights'),'/alertRules/$($AssociatedAnalyticalRuleName.Trim())')]"
+                                $PropArrayVal += "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers/', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($AssociatedAnalyticalRuleName.Trim())')]"
                                 $PropertyVal.conditionProperties.propertyValues = $PropArrayVal
                             }
                         }
@@ -261,7 +261,7 @@ Function Download-SentinelArtifacts {
                                 $RuleAction.actionConfiguration.tenantId = "[subscription().tenantId]"
                             }
                             $LogicAppResourceId = Split-Path $LogicAppResourceId -leaf
-                            $RuleAction.actionConfiguration.logicAppResourceId = "[concat(subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroup().name), '/providers/Microsoft.Logic/workflows/', '$($LogicAppResourceId.Trim())')]"                            
+                            $RuleAction.actionConfiguration.logicAppResourceId = "[concat(subscriptionResourceId('Microsoft.Resources/resourceGroups/', resourceGroup().name), '/providers/Microsoft.Logic/workflows/', '$($LogicAppResourceId.Trim())')]"                            
                         }
                     }                   
                 }    
@@ -287,7 +287,7 @@ Function Download-SentinelArtifacts {
                 $ArtifactKind = "ScheduledAnalyticRules"
                 $alertName = $WorkspaceArtifact.Name
                 $WorkspaceArtifact.id = ""
-                $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
+                $WorkspaceArtifact.id = "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers/', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/$($alertName)')]"
                 $WorkspaceArtifact | Add-Member -NotePropertyName "apiVersion" -NotePropertyValue "2021-09-01-preview" -Force
                 $WorkspaceArtifact.PSObject.Properties.Remove('etag')
                 $WorkspaceArtifact.properties.PSObject.Properties.Remove('lastModifiedUtc')
